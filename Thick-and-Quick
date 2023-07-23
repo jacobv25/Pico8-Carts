@@ -50,6 +50,32 @@ EnemyProto = {
     end
 }
 
+ChaserEnemyProto = {
+    sprite = 49,  -- Different sprite number for chaser enemy
+    speed = 0.5,  -- Speed of the chaser enemy. Adjust as needed.
+    new = function(self, x, y)
+        local obj = {
+            x = x or 0,
+            y = y or 0,
+            sprite = self.sprite,
+            speed = self.speed
+        }
+        setmetatable(obj, self)
+        self.__index = self
+        return obj
+    end,
+    update = function(self)
+        local dx = player.x - self.x
+        local dy = player.y - self.y
+        local dist = sqrt(dx * dx + dy * dy)
+        local nx = dx / dist
+        local ny = dy / dist
+        self.x += nx * self.speed
+        self.y += ny * self.speed
+    end
+}
+
+
 local solid_tiles_1 = {}
 
 projectiles = {}
@@ -63,142 +89,179 @@ new_tile_x = 0
 new_tile_y = 0
 new_tile = 0
 curr_map = 1
+game_state = "playing"
 
 -- update function
 function _update()
-    spawn_timer += 1
+    if game_state == "playing" then
+        spawn_timer += 1
 
-    -- Debug mode toggle (Hold X for 3 seconds)
-    if btn(5) then
-        debug_counter = debug_counter + 1
-        if debug_counter >= 90 then
-            -- assuming 30 fps, 90 frames would be 3 seconds
-            debug = not debug -- toggle debug mode
-            debug_counter = 0 -- reset counter
+        -- Debug mode toggle (Hold X for 3 seconds)
+        if btn(5) then
+            debug_counter = debug_counter + 1
+            if debug_counter >= 90 then
+                -- assuming 30 fps, 90 frames would be 3 seconds
+                debug = not debug -- toggle debug mode
+                debug_counter = 0 -- reset counter
+            end
+        else
+            debug_counter = 0 -- reset counter if any button is released
         end
-    else
-        debug_counter = 0 -- reset counter if any button is released
-    end
 
-    -- create an enemy ever 3 seconds
-    if spawn_timer >= 90 then
-        spawn_timer = 0
-        add(enemies, EnemyProto:new(rnd(120), rnd(120)))
-    end
-    -- update enemies
-    for enemy in all(enemies) do
-        enemy:update()
-    end
-    -- move projectiles
-    for projectile in all(projectiles) do
-        projectile.x += projectile.dx
-        projectile.y += projectile.dy
-    end
-    -- remove projectiles off screen
-    for projectile in all(projectiles) do
-        if projectile.x < 0 or projectile.x > 128 or projectile.y < 0 or projectile.y > 128 then
-            del(projectiles, projectile)
+        -- create a shooting enemy every 3 seconds
+        if spawn_timer % 90 == 0 then
+            add(enemies, EnemyProto:new(rnd(120), rnd(120)))
         end
-    end
 
-    -- Destroy enemy when player touches
-    for enemy in all(enemies) do
-        if is_colliding(player, enemy) then
-            del(enemies, enemy)
-        end
-    end
-    
-    -- Player movement
-    player.speed = player.dashing and 2 or 1
-    local dx, dy = 0, 0
-    if move_mode == "four_direction" then
-        if btn(1) then
-            -- Right
-            dx = player.speed
-        elseif btn(0) then
-            -- Left
-            dx = -player.speed
-        elseif btn(3) then
-            -- Down
-            dy = player.speed
-        elseif btn(2) then
-            -- Up
-            dy = -player.speed
-        end
-    else
-        -- eight_direction
-        if btn(0) then dx = dx - player.speed end
-        if btn(1) then dx = dx + player.speed end
-        if btn(2) then dy = dy - player.speed end
-        if btn(3) then dy = dy + player.speed end
-    end
+        -- create a chaser enemy every 2 seconds at the edge of the screen
+        if spawn_timer % 60 == 0 then
+            -- Randomly select the side (0 for top/bottom, 1 for left/right)
+            local side = flr(rnd(2))
+            local x, y
+            if side == 0 then
+                -- spawn at top or bottom
+                x = rnd(128)
+                y = flr(rnd(2)) * 128
+            else
+                -- spawn at left or right
+                x = flr(rnd(2)) * 128
+                y = rnd(128)
+            end
+            add(enemies, ChaserEnemyProto:new(x, y))
+        end        
 
-    -- Calculate player's potential new position in terms of tilemap
-    new_x = player.x + dx
-    new_y = player.y + dy
-    new_tile_x1 = flr(new_x / 8)
-    new_tile_y1 = flr(new_y / 8)
-    new_tile_x2 = flr((new_x + player.width) / 8)
-    new_tile_y2 = flr((new_y + player.height) / 8)
-
-    -- Check the tile at the potential new positions
-    if curr_map == 1 then
-        new_tile1 = mget(new_tile_x1, new_tile_y1)
-        new_tile2 = mget(new_tile_x1, new_tile_y2)
-        new_tile3 = mget(new_tile_x2, new_tile_y1)
-        new_tile4 = mget(new_tile_x2, new_tile_y2)
-    -- elseif curr_map == 2 then
-    --     -- Assuming that the map 2 starts at x=16 and y=0 in the sprite sheet
-    --     new_tile1 = mget(new_tile_x1, new_tile_y1 + 16)
-    --     new_tile2 = mget(new_tile_x1, new_tile_y2 + 16)
-    --     new_tile3 = mget(new_tile_x2, new_tile_y1 + 16)
-    --     new_tile4 = mget(new_tile_x2, new_tile_y2 + 16)
-    end
-    new_tile = new_tile1 -- For debugger
-    
-    -- Collision detection
-    if(curr_map == 1) then 
-        if not (is_in_table(new_tile1, solid_tiles_1) or is_in_table(new_tile2, solid_tiles_1) or is_in_table(new_tile3, solid_tiles_1) or is_in_table(new_tile4, solid_tiles_1)) then
-            player.x = mid(0, new_x, 128 - player.width)
-            player.y = mid(0, new_y, 128 - player.height)
+        -- update enemies
+        for enemy in all(enemies) do
+            enemy:update()
         end
-    end
-
-    -- Dash code
-    if btnp(4) and not player.dashing then
-        player.dashing = true
-        player.dash_timer = 15
-    end
-    if player.dashing then
-        player.dash_timer = player.dash_timer - 1
-        if player.dash_timer <= 0 then 
-            player.dashing = false
+        -- move projectiles
+        for projectile in all(projectiles) do
+            projectile.x += projectile.dx
+            projectile.y += projectile.dy
         end
+        -- remove projectiles off screen
+        for projectile in all(projectiles) do
+            if projectile.x < 0 or projectile.x > 128 or projectile.y < 0 or projectile.y > 128 then
+                del(projectiles, projectile)
+            end
+        end
+
+        -- Destroy enemy when player touches
+        for enemy in all(enemies) do
+            -- Check if the enemy is a chaser
+            if enemy.speed and is_colliding(player, enemy) then
+                game_state = "gameover"
+
+            elseif is_colliding(player, enemy) then
+                del(enemies, enemy)
+            end
+        end
+        -- Detect player and projectile collision
+        for projectile in all(projectiles) do
+            if is_colliding(player, projectile) then
+                game_state = "gameover"
+            end
+        end
+
+        -- Player movement
+        player.speed = player.dashing and 2 or 1
+        local dx, dy = 0, 0
+        if move_mode == "four_direction" then
+            if btn(1) then
+                -- Right
+                dx = player.speed
+            elseif btn(0) then
+                -- Left
+                dx = -player.speed
+            elseif btn(3) then
+                -- Down
+                dy = player.speed
+            elseif btn(2) then
+                -- Up
+                dy = -player.speed
+            end
+        else
+            -- eight_direction
+            if btn(0) then dx = dx - player.speed end
+            if btn(1) then dx = dx + player.speed end
+            if btn(2) then dy = dy - player.speed end
+            if btn(3) then dy = dy + player.speed end
+        end
+
+        -- Calculate player's potential new position in terms of tilemap
+        new_x = player.x + dx
+        new_y = player.y + dy
+        new_tile_x1 = flr(new_x / 8)
+        new_tile_y1 = flr(new_y / 8)
+        new_tile_x2 = flr((new_x + player.width) / 8)
+        new_tile_y2 = flr((new_y + player.height) / 8)
+
+        -- Check the tile at the potential new positions
+        if curr_map == 1 then
+            new_tile1 = mget(new_tile_x1, new_tile_y1)
+            new_tile2 = mget(new_tile_x1, new_tile_y2)
+            new_tile3 = mget(new_tile_x2, new_tile_y1)
+            new_tile4 = mget(new_tile_x2, new_tile_y2)
+        -- elseif curr_map == 2 then
+        --     -- Assuming that the map 2 starts at x=16 and y=0 in the sprite sheet
+        --     new_tile1 = mget(new_tile_x1, new_tile_y1 + 16)
+        --     new_tile2 = mget(new_tile_x1, new_tile_y2 + 16)
+        --     new_tile3 = mget(new_tile_x2, new_tile_y1 + 16)
+        --     new_tile4 = mget(new_tile_x2, new_tile_y2 + 16)
+        end
+        new_tile = new_tile1 -- For debugger
+        
+        -- Collision detection
+        if(curr_map == 1) then 
+            if not (is_in_table(new_tile1, solid_tiles_1) or is_in_table(new_tile2, solid_tiles_1) or is_in_table(new_tile3, solid_tiles_1) or is_in_table(new_tile4, solid_tiles_1)) then
+                player.x = mid(0, new_x, 128 - player.width)
+                player.y = mid(0, new_y, 128 - player.height)
+            end
+        end
+
+        -- Dash code
+        if btnp(4) and not player.dashing then
+            player.dashing = true
+            player.dash_timer = 15
+        end
+        if player.dashing then
+            player.dash_timer = player.dash_timer - 1
+            if player.dash_timer <= 0 then 
+                player.dashing = false
+            end
+        end
+
+    elseif game_state == "gameover" then
+        -- logic for game over state
     end    
 end
 
 -- draw function
 function _draw()
-    cls()
-    map(current_room_x, current_room_y)
-    for enemy in all(enemies) do
-        spr(enemy.sprite, enemy.x, enemy.y) 
-    end
-    for projectile in all(projectiles) do
-        spr(projectile.sprite, projectile.x, projectile.y)
-    end
-    
-    if debug then
-        print("x: "..player.x.." y: "..player.y, 0, 0, 7)
-        print("fps: "..flr(stat(7)), 0, 6, 7)
-        print("state: "..game_state, 0, 12, 7)
-        print("tile_x: "..new_tile_x.." tile_y: "..new_tile_y, 0, 18, 7)
-        print("tile: "..new_tile, 0, 24, 7)
-        print("curr_map: "..curr_map, 0, 30, 7)
-    end
+    if game_state == "playing" then
+        cls()
+        map(current_room_x, current_room_y)
+        for enemy in all(enemies) do
+            spr(enemy.sprite, enemy.x, enemy.y) 
+        end
+        for projectile in all(projectiles) do
+            spr(projectile.sprite, projectile.x, projectile.y)
+        end
+        
+        if debug then
+            print("x: "..player.x.." y: "..player.y, 0, 0, 7)
+            print("fps: "..flr(stat(7)), 0, 6, 7)
+            print("state: "..game_state, 0, 12, 7)
+            print("tile_x: "..new_tile_x.." tile_y: "..new_tile_y, 0, 18, 7)
+            print("tile: "..new_tile, 0, 24, 7)
+            print("curr_map: "..curr_map, 0, 30, 7)
+        end
 
-    spr(player.dashing and player.dash_sprite or player.sprite, player.x, player.y)
-
+        spr(player.dashing and player.dash_sprite or player.sprite, player.x, player.y)
+    elseif game_state == "gameover" then
+        cls() -- clear screen
+        print("Game Over!", 50, 64, 7) -- print game over message in the center of the screen
+    end
 end
 
 function distance(x1, y1, x2, y2)
@@ -222,22 +285,22 @@ function is_colliding(a, b)
 end
 
 __gfx__
-00000000004444000044440000444400004444000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000044444400444444004444440044444400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0070070000ffff0000ffff0000ffff0000ffff000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0007700000cccc0000cccc0000cccc0000cccc000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-000770000cccccc0fccccccf0cccccc0fccccccf0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-007007000fccccf000cccc550fccccf000cccc550000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000005555005555555500555500555555550000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000005555005550000000555500555000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000440000004400000044000000440000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000004444000044440000444400004444000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000ff000000ff0f0000ff0f0000ff0f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0000000000cccc0000cccc0000cccc0000cccc000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0000000000fccf000f0cc0000f0cc0000f0cc0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000550000005550000055000005550000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000550000050000000055000000005000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000004444000000000000000000000000000000000000aaaa0000aaaa0000aaaa0000aaaa00000000000000000000000000000000000000000000000000
+0000000004444440000000000000000000000000000000000aaaaaa00aaaaaa00aaaaaa00aaaaaa0000000000000000000000000000000000000000000000000
+0070070000ffff000000000000000000000000000000000000aaaa0000aaaa0000aaaa0000aaaa00000000000000000000000000000000000000000000000000
+0007700000cccc0000000000000000000000000000000000a0aaaa00a0aaaa0000aaaa0a00aaaa0a000000000000000000000000000000000000000000000000
+000770000cccccc0000000000000000000000000000000000aaaaaa00aaaaaa00aaaaaa00aaaaaa0000000000000000000000000000000000000000000000000
+007007000fccccf00000000000000000000000000000000000aaaaaa00aaaa0aa0aaaaaaa0aaaa00000000000000000000000000000000000000000000000000
+000000000055550000000000000000000000000000000000aaaaaaaa00aaaa00aaaaaaaa00aaaa00000000000000000000000000000000000000000000000000
+000000000055550000000000000000000000000000000000aaa0000000aaaa00aaa0000000aaaa00000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000444400004444000044440000444400000000000000000000000000000000000000000000000000
+00000000000440000004400000044000000440000000000004444440044444400444444004444440000000000000000000000000000000000000000000000000
+00000000004444000044440000444400004444000000000000ffff0000ffff0000ffff0000ffff00000000000000000000000000000000000000000000000000
+00000000000ff000000ff0f0000ff0f0000ff0f000000000f0cccc00f0cccc0000cccc0f00cccc0f000000000000000000000000000000000000000000000000
+0000000000cccc0000cccc0000cccc0000cccc00000000000cccccc00cccccc00cccccc00cccccc0000000000000000000000000000000000000000000000000
+0000000000fccf000f0cc0000f0cc0000f0cc0000000000000cccc5f00cccc0ff0cccc55f0cccc00000000000000000000000000000000000000000000000000
+00000000000550000005550000055000005550000000000055555555005555005555555500555500000000000000000000000000000000000000000000000000
+00000000000550000050000000055000000005000000000055500000005555005550000000555500000000000000000000000000000000000000000000000000
 00588800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 0588888000000000000aa000000aa000000aa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 588887880033330000aaaa0000aaaa0000aaaa000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
@@ -246,14 +309,14 @@ __gfx__
 55888888005555000a0aa0000a0aa0000a0aa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 0558888000000000000aaa00000aa00000aaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 005555000000000000a00000000aa00000000a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000000000cccccc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000dccccccc0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000d6cccc6c0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000dccccccc0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000dc6cc6cc0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000000000dd66cc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0000000000dccc000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000dd0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 3bbbbb3bbbbbbbbb0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 b33bbbbbbbbbbbbb0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 b3bbbbbbbbbbbbbb0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
