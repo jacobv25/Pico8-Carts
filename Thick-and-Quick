@@ -5,8 +5,8 @@ __lua__
 player = {
     spr = 1,
     spr2 = 3,
-    x = 10,
-    y = 10,
+    x = 64,
+    y = 64,
     top = 1,
     bot = 7,
     left = 2,
@@ -23,11 +23,32 @@ enemy = {
 }
 chaser = {
     spr = 36, -- change this to the sprite number you want for the Chaser
-    top = 7,
+    x = 64,
+    y = 64,
+    top = 0,
     bot = 7,
-    left = 7,
+    left = 0,
     right = 7,
     speed = 1 -- you can adjust this to change how fast the chaser moves towards the player
+}
+
+big_chaser = {
+    sprs = {38, 39, 54, 55}, -- these are the sprite numbers for the four parts
+    x = 64,
+    y = 64,
+    speed = .5, -- adjust this to change how fast the big chaser moves
+    top = 0, -- adjust these as necessary
+    bot = 15,
+    left = 0,
+    right = 15,
+
+    tl_corner = { left = 0, right = 1, top = 0, bot = 1 }, --corners of the big chaser
+    tr_corner = { left = 14, right = 15, top = 0, bot = 1 },
+    bl_corner = { left = 0, right = 1, top = 14, bot = 15 },
+    br_corner = { left = 14, right = 15, top = 14, bot = 15 },
+
+    v_non_corner = { left = 2, right = 13, top = 0, bot = 0 }, --vertical parts of the big chaser that are not corners
+    h_non_corner = { left = 0, right = 0, top = 2, bot = 13 }, --horizontal parts of the big chaser that are not corners
 }
 
 projectile = {
@@ -46,48 +67,105 @@ projectiles = {}
 last_enemy_projectile_time = {}
 last_projectile_time = 0
 last_enemy_time = 0
+debug = {}
+key_pressed = ""
 
-debug = false
+chasers_on = false
+shooters_on = false
+projectiles_on = false
+pxl_mvmt_on = true
+
 -- Define map
 current_room_x = 0
 current_room_y = 0
 
+-- Debug Player Position
 playerTop = player.y + player.top
 playerBot = player.y + player.bot
 playerLeft = player.x + player.left
 playerRight = player.x + player.right
 
-enemyTop = enemy.y + enemy.top
-enemyBot = enemy.y + enemy.bot
-enemyLeft = enemy.x + enemy.left
-enemyRight = enemy.x + enemy.right
+-- -- Debug Enemy Position
+-- enemyTop = enemy.y + enemy.top
+-- enemyBot = enemy.y + enemy.bot
+-- enemyLeft = enemy.x + enemy.left
+-- enemyRight = enemy.x + enemy.right
 
-projectileTop = projectile.y + projectile.top
-projectileBot = projectile.y + projectile.bot
-projectileLeft = projectile.x + projectile.left
-projectileRight = projectile.x + projectile.right
+-- -- Debug Projectile Position
+-- projectileTop = projectile.y + projectile.top
+-- projectileBot = projectile.y + projectile.bot
+-- projectileLeft = projectile.x + projectile.left
+-- projectileRight = projectile.x + projectile.right
+
+-- Debug Big Chaser Position
+bigChaserTop = big_chaser.y + big_chaser.top
+bigChaserBot = big_chaser.y + big_chaser.bot
+bigChaserLeft = big_chaser.x + big_chaser.left
+bigChaserRight = big_chaser.x + big_chaser.right
 
 function _init()
-    -- Enables mouse support
+    cls()
+
+    -- Enables mouse and keyboard support
     poke(0x5f2d, 1)
+
 end
 
 -- Game loop
 function _update()
-    -- Debug mode toggle
-    if btnp(5) then
-        debug = not debug -- toggle debug mode
-    end
 
     update_player()
 
-    for i, enemy in pairs(enemies) do
+    update_enemies()
 
+    update_big_chaser()
+
+    update_projectiles()
+
+    create_enemies()
+
+    debug[1] = "player top: " .. playerTop
+    debug[2] = "player bot: " .. playerBot
+    debug[3] = "player left: " .. playerLeft
+    debug[4] = "player right: " .. playerRight
+
+    debug[5] = "big_c top: " .. bigChaserTop
+    debug[6] = "big_c bot: " .. bigChaserBot
+    debug[7] = "big_c left: " .. bigChaserLeft
+    debug[8] = "big_c right: " .. bigChaserRight
+
+
+end
+
+function update_big_chaser()
+    -- If big chaser is on, move it towards the player
+    if big_chaser.speed then
+        -- local dx = player.x - big_chaser.x
+        -- local dy = player.y - big_chaser.y
+        -- local len = sqrt(dx * dx + dy * dy)
+        -- big_chaser.x = big_chaser.x + dx / len * big_chaser.speed
+        -- big_chaser.y = big_chaser.y + dy / len * big_chaser.speed
+
+        if check_big_chaser_collision(big_chaser, player) then
+            -- If the player collides with the big chaser, print to screen
+            debug[0] = "You were eaten by the big chaser!"
+        else
+            debug[0] = ""
+        end
+    end
+    bigChaserTop = big_chaser.y + big_chaser.top
+    bigChaserBot = big_chaser.y + big_chaser.bot
+    bigChaserLeft = big_chaser.x + big_chaser.left
+    bigChaserRight = big_chaser.x + big_chaser.right
+end
+
+function update_enemies()
+    for i, enemy in pairs(enemies) do
         -- If enemy is a chaser, move it towards the player
         if enemy.speed then
             local dx = player.x - enemy.x
             local dy = player.y - enemy.y
-            local len = sqrt(dx*dx + dy*dy)
+            local len = sqrt(dx * dx + dy * dy)
             enemy.x = enemy.x + dx / len * enemy.speed
             enemy.y = enemy.y + dy / len * enemy.speed
         end
@@ -97,20 +175,24 @@ function _update()
             last_enemy_projectile_time[i] = time()
         end
 
-        -- If 3 seconds have passed, spawn a projectile
-        if time() - last_enemy_projectile_time[i] >= 3 then
-            spawn_projectile(enemy)
-            last_enemy_projectile_time[i] = time()
+        if projectiles_on then 
+            -- If 3 seconds have passed, spawn a projectile
+            if time() - last_enemy_projectile_time[i] >= 3 then
+                spawn_projectile(enemy)
+                last_enemy_projectile_time[i] = time()
+            end
         end
     end
-
-    if time() - last_enemy_time >= 3 then -- Spawn an enemy every 3 seconds
-        spawn_enemy()
-        last_enemy_time = time()
-    end
-    update_projectiles()
 end
 
+function create_enemies()
+    if(chasers_on or shooters_on) then
+        if time() - last_enemy_time >= 3 then
+            spawn_enemy()
+            last_enemy_time = time()
+        end
+    end
+end
 
 function _draw()
     cls()
@@ -119,12 +201,14 @@ function _draw()
     draw_player()
     draw_enemies()
     draw_projectiles()
-    
-    if debug then
+
+    draw_big_chaser(big_chaser)
+
+    -- if debug then
         -- If debug is true, draw debug information
         draw_debug()
-        draw_mouse()
-    end
+        -- draw_mouse()
+    -- end
 end
 
 function draw_player()
@@ -136,6 +220,13 @@ function draw_enemies()
     for e in all(enemies) do
         spr(e.spr, e.x, e.y)
     end
+end
+
+function draw_big_chaser(chaser)
+    spr(chaser.sprs[1], chaser.x, chaser.y)
+    spr(chaser.sprs[2], chaser.x + 8, chaser.y)
+    spr(chaser.sprs[3], chaser.x, chaser.y + 8)
+    spr(chaser.sprs[4], chaser.x + 8, chaser.y + 8)
 end
 
 -- Function to draw projectiles
@@ -151,10 +242,57 @@ end
 
 function draw_mouse()
     -- Draw sprite at mouse coordinates. The -1 is to adjust for PICO-8's 1-indexed nature.
-    spr(0,stat(32)-1,stat(33)-1)
+    spr(0, stat(32) - 1, stat(33) - 1)
 
     -- Print the state of the mouse buttons to the console
     print(stat(34))
+end
+
+function check_big_chaser_collision(chaser, player)
+    -- Check collision with vertical non-corner parts of the big chaser
+    local verticalCollision = check_collision(player, {
+        x = chaser.x + chaser.v_non_corner.left,
+        y = chaser.y + chaser.top,
+        left = 0,
+        right = chaser.v_non_corner.right - chaser.v_non_corner.left,
+        top = 0,
+        bot = chaser.bot - chaser.top
+    })
+
+    -- Check collision with horizontal non-corner parts of the big chaser
+    local horizontalCollision = check_collision(player, {
+        x = chaser.x + chaser.left,
+        y = chaser.y + chaser.h_non_corner.top,
+        left = 0,
+        right = chaser.right - chaser.left,
+        top = 0,
+        bot = chaser.h_non_corner.bot - chaser.h_non_corner.top
+    })
+
+    -- Check if player is in any of the corner areas
+    local inCorner = false
+    local corners = {chaser.tl_corner, chaser.tr_corner, chaser.bl_corner, chaser.br_corner}
+    for _, corner in pairs(corners) do
+        if check_collision(player, {
+            x = chaser.x + corner.left,
+            y = chaser.y + corner.top,
+            left = 0,
+            right = corner.right - corner.left,
+            top = 0,
+            bot = corner.bot - corner.top
+        }) then
+            inCorner = true
+            break
+        end
+    end
+
+    -- If the player is in a corner but not in a non-corner part, return false
+    if inCorner and not (verticalCollision or horizontalCollision) then
+        return false
+    end
+
+    -- Return true if there's a collision with any non-corner part
+    return verticalCollision or horizontalCollision
 end
 
 -- This function checks if two rectangles overlap (collide)
@@ -208,7 +346,6 @@ function spawn_projectile(enemy)
     sfx(0)
 end
 
-
 -- Function to update projectiles
 function update_projectiles()
     for proj in all(projectiles) do
@@ -226,7 +363,20 @@ end
 
 -- Function to spawn enemies
 function spawn_enemy()
-    local type = flr(rnd(2)) -- Randomly pick an enemy type
+    if chasers_on and shooters_on then
+        -- If both chasers and shooters are on, pick a random enemy type
+        local type = flr(rnd(2))
+    end
+    if chasers_on and not shooters_on then
+        -- If only chasers are on, spawn a chaser
+        local type = 1
+    end
+    if not chasers_on and shooters_on then
+        -- If only shooters are on, spawn a shooter
+        local type = 0
+    end
+
+    -- Randomly pick an enemy type
     local new_enemy
     if type == 0 then
         new_enemy = {
@@ -253,7 +403,6 @@ function spawn_enemy()
     add(enemies, new_enemy)
 end
 
-
 function test_collision(p, e)
     if check_collision(p, e) then
         -- If there's a collision, use certain sprites
@@ -268,7 +417,7 @@ end
 
 -- Function to move player with arrow keys
 function update_player()
-    if debug then
+    if pxl_mvmt_on then
         if btnp(0) then player.x = player.x - 1 end
         -- Left
         if btnp(1) then player.x = player.x + 1 end
@@ -294,29 +443,12 @@ function update_player()
     playerRight = player.x + player.right
 end
 
-function draw_debug(a, b)
-    -- print("fps: " .. flr(stat(7)), 0, 6, 7)
-
-    -- print player's top, bottom, left, and right
-    print("player top: " .. playerTop, 0, 12, 7)
-    print("player bot: " .. playerBot, 0, 18, 7)
-    print("player left: " .. playerLeft, 0, 24, 7)
-    print("player right: " .. playerRight, 0, 30, 7)
-    
-    print("--------------------", 0, 36, 7)
-
-    -- print enemy's top, bottom, left, and right
-    -- print("enemy top: " .. enemyTop, 0, 42, 7)
-    -- print("enemy bot: " .. enemyBot, 0, 48, 7)
-    -- print("enemy left: " .. enemyLeft, 0, 54, 7)
-    -- print("enemy right: " .. enemyRight, 0, 60, 7)
-
-    -- print projectile's top, bottom, left, and right
-    print("projectile top: " .. projectileTop, 0, 42, 7)
-    print("projectile bot: " .. projectileBot, 0, 48, 7)
-    print("projectile left: " .. projectileLeft, 0, 54, 7)
-    print("projectile right: " .. projectileRight, 0, 60, 7)
-
+-- Function to draw debug information
+function draw_debug()
+    for line_number, text in pairs(debug) do
+        local y_coordinate = line_number * 6 -- Each line is 6 pixels apart
+        print(text, 0, y_coordinate, 7)
+    end
 end
 
 __gfx__
@@ -336,22 +468,22 @@ __gfx__
 00000000005555000066660000000000558eeeee00000ccccccc00000000000000000cccccccccc0000000000000000000000000000000000000000000000000
 000000000000000000000000000000000558888000000c0ccc0c00000000000000000cccc0000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000005555000000cc00000cc0000000000000000cccc0000000000000000000000000000000000000000000000000000000
-0000000000000000000000000000000000aaaa0000aaaa00000000000000000ccccccccccc000000000000000000000000000000000000000000000000000000
-000000000000000000000000000000000aaaaaa00aaaaaa0000000000000000ccccccccccccccccc000000000000000000000000000000000000000000000000
-000000000000000000000000000000009a0a0aaa9aa0a0aa000000000000000ccccccccccccccccc000000000000000000000000000000000000000000000000
-000000000000000000000000000000009aaaaaaa9aaaaaaa0000000000000000000000cccccccccc000000000000000000000000000000000000000000000000
-000000000000000000000000000000009a0a0aaa9aa0a0aa0000000000000000000000ccc0000000000000000000000000000000000000000000000000000000
-000000000000000000000000000000009a000aaa9aa000aa0000000000000000000000ccc0000000000000000000000000000000000000000000000000000000
-0000000000000000000000000000000009aaaaa009aaaaa00000000000000000000000ccc0000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000009999000099990000000000000000000000ccccccccc000000000000000000000000000000000000000000000000000
-0000000000000000000000000000000000aaaa0000aaaa000000000000000000000ccccccccccc00000000000000000000000000000000000000000000000000
-000000000000000000000000000000000aa00aa00aa00aa0000000000000000000ccccccccccccc0000000000000000000000000000000000000000000000000
-000000000000000000000000000000009a0aa0aa9a0aa0aa000000000000000000ccccc000cccccc000000000000000000000000000000000000000000000000
-000000000000000000000000000000009aaaaaaa9aaaaaaa000000000000000000cccc00000cccccc00000000000000000000000000000000000000000000000
-000000000000000000000000000000009a0a0aaa9aa0a0aa00000000000000000cccc0000000ccccc00000000000000000000000000000000000000000000000
-000000000000000000000000000000009aaaaaaa9aaaaaaa00000000000000000cccc000000000ccc00000000000000000000000000000000000000000000000
-0000000000000000000000000000000009aaaaa009aaaaa000000000000000000cccc000000000ccc00000000000000000000000000000000000000000000000
-00000000000000000000000000000000009999000099990000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000aaaa0000aaaa0000000aaaaaa00000cccccccccc000000000000000000000080aaaa0800aaaa0088000aaaaaa00088
+000000000000000000000000000000000aaaaaa00aaaaaa00009aaaaaaaaa000cccccccccccccccc00000000000000000aaaaaa00aaaaaa0880aaaaaaaaaa088
+000000000000000000000000000000009a0a0aaa9aa0a0aa009aaaaaaaaaaa00cccccccccccccccc00000000000000009a0a0aaa9aa0a0aa00aaaaaaaaaaaa00
+000000000000000000000000000000009aaaaaaa9aaaaaaa09aaaaaaaaaaaaa0000000cccccccccc00000000000000009aaaaaaa9aaaaaaa0aaaaaaaaaaaaaa0
+000000000000000000000000000000009a0a0aaa9aa0a0aa09aaaaaaaaaaaaa0000000ccc000000000000000000000009a0a0aaa9aa0a0aa0aaaaaaaaaaaaaa0
+000000000000000000000000000000009a000aaa9aa000aa49aaaaaaaaaaaaaa000000ccc000000000000000000000009a000aaa9aa000aaaaaaaaaaaaaaaaaa
+0000000000000000000000000000000009aaaaa009aaaaa049a1aaaaaaaa1aaa000000ccc0000000000000000000000009aaaaa009aaaaa0aaa1aaaaaaaa1aaa
+00000000000000000000000000000000009999000099990049aaaaaaaaaaaaaa0000ccccccccc00000000000000000008099990800999900aaaaaaaaaaaaaaaa
+0000000000000000000000000000000000aaaa0000aaaa0049aaaaaaaaaaaaaa000ccccccccccc00000000000000000080aaaa0880aaaa08aaaaaaaaaaaaaaaa
+000000000000000000000000000000000aa00aa00aa00aa049aaaa1aa1aaaaa900ccccccccccccc000000000000000000aa00aa00aa00aa0aaaaaa1aa1aaaaaa
+000000000000000000000000000000009a0aa0aa9a0aa0aa49aaaa1111aaa99400ccccc000cccccc00000000000000009a0aa0aa9a0aa0aaaaaaaa1111aaaaaa
+000000000000000000000000000000009aaaaaaa9aaaaaaa099aaaaaaaaaa99000cccc00000cccccc0000000000000009aaaaaaa9aaaaaaa0aaaaaaaaaaaaaa0
+000000000000000000000000000000009a0a0aaa9aa0a0aa049aaaaaaaaaa9400cccc0000000ccccc0000000000000009a0a0aaa9aa0a0aa0aaaaaaaaaaaaaa0
+000000000000000000000000000000009aaaaaaa9aaaaaaa00499aaaaaa994000cccc000000000ccc0000000000000009aaaaaaa9aaaaaaa00aaaaaaaaaaaa00
+0000000000000000000000000000000009aaaaa009aaaaa000044999999440000cccc000000000ccc00000000000000009aaaaa009aaaaa0880aaaaaaaaaa088
+000000000000000000000000000000000099990000999900000004444440000000000000000000000000000000000000809999088099990888000aaaaaa00088
 bbbbbbbbbbbbb3bbbbb53bbb00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 bbbbbbbbbbbbb3bbbb5333bb00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 bbbbbbbbb3bbbbbbbb5333bb00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
