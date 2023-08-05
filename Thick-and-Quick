@@ -12,7 +12,7 @@ player = {
     left = 2,
     right = 5
 }
-enemy = {
+shooter = {
     spr = 17,
     x = 64,
     y = 64,
@@ -70,10 +70,10 @@ last_enemy_time = 0
 debug = {}
 key_pressed = ""
 
-chasers_on = false
+chasers_on = true
 shooters_on = false
 projectiles_on = false
-pxl_mvmt_on = true
+pxl_mvmt_on = false
 
 -- Define map
 current_room_x = 0
@@ -113,77 +113,102 @@ end
 
 -- Game loop
 function _update()
-
     update_player()
-
-    update_enemies()
-
-    update_big_chaser()
-
+    update_enemies()    -- This function now includes updates for big chasers, small chasers, etc.
     update_projectiles()
-
     create_enemies()
 
-    debug[1] = "player top: " .. playerTop
-    debug[2] = "player bot: " .. playerBot
-    debug[3] = "player left: " .. playerLeft
-    debug[4] = "player right: " .. playerRight
+    debug[1] = "player top: " .. player.top
+    debug[2] = "player bot: " .. player.bot
+    debug[3] = "player left: " .. player.left
+    debug[4] = "player right: " .. player.right
 
-    debug[5] = "big_c top: " .. bigChaserTop
-    debug[6] = "big_c bot: " .. bigChaserBot
-    debug[7] = "big_c left: " .. bigChaserLeft
-    debug[8] = "big_c right: " .. bigChaserRight
-
-
+    debug[5] = "big_c top: " .. big_chaser.top
+    debug[6] = "big_c bot: " .. big_chaser.bot
+    debug[7] = "big_c left: " .. big_chaser.left
+    debug[8] = "big_c right: " .. big_chaser.right
 end
 
-function update_big_chaser()
-    -- If big chaser is on, move it towards the player
-    if big_chaser.speed then
-        -- local dx = player.x - big_chaser.x
-        -- local dy = player.y - big_chaser.y
-        -- local len = sqrt(dx * dx + dy * dy)
-        -- big_chaser.x = big_chaser.x + dx / len * big_chaser.speed
-        -- big_chaser.y = big_chaser.y + dy / len * big_chaser.speed
 
-        if check_big_chaser_collision(big_chaser, player) then
-            -- If the player collides with the big chaser, print to screen
-            debug[0] = "You were eaten by the big chaser!"
-        else
-            debug[0] = ""
+function update_generic_enemy(enemy, i)
+    local dx = player.x - enemy.x
+    local dy = player.y - enemy.y
+    local len = sqrt(dx * dx + dy * dy)
+    enemy.x = enemy.x + dx / len * enemy.speed
+    enemy.y = enemy.y + dy / len * enemy.speed
+end
+
+function update_big_chaser(enemy)
+    if check_big_chaser_collision(enemy, player) then
+        debug[0] = "You were eaten by the big chaser!"
+    else
+        debug[0] = ""
+    end
+end
+
+function update_small_chasers(i, enemy)
+    for j = i + 1, #enemies do
+        local enemy_j = enemies[j]
+        if enemy_j ~= nil and enemy_j.speed and not enemy_j.is_big_chaser and check_collision(enemy, enemy_j) then
+            -- Code to combine the two chasers and create a big chaser
+            local combined_chaser = {
+                sprs = big_chaser.sprs,
+                x = (enemy.x + enemy_j.x) / 2,
+                y = (enemy.y + enemy_j.y) / 2,
+                speed = big_chaser.speed,
+                top = big_chaser.top,
+                bot = big_chaser.bot,
+                left = big_chaser.left,
+                right = big_chaser.right,
+                tl_corner = big_chaser.tl_corner,
+                tr_corner = big_chaser.tr_corner,
+                bl_corner = big_chaser.bl_corner,
+                br_corner = big_chaser.br_corner,
+                v_non_corner = big_chaser.v_non_corner,
+                h_non_corner = big_chaser.h_non_corner,
+                is_big_chaser = true
+            }
+
+            -- Adding the new combined chaser to the enemies list
+            add(enemies, combined_chaser)
+
+            -- Removing the original small chasers from the enemies list
+            del(enemies, enemy_j)
+            del(enemies, enemy)
         end
     end
-    bigChaserTop = big_chaser.y + big_chaser.top
-    bigChaserBot = big_chaser.y + big_chaser.bot
-    bigChaserLeft = big_chaser.x + big_chaser.left
-    bigChaserRight = big_chaser.x + big_chaser.right
+end
+
+
+function update_projectiles(i, enemy)
+    if not last_enemy_projectile_time[i] then
+        last_enemy_projectile_time[i] = time()
+    end
+
+    if projectiles_on and time() - last_enemy_projectile_time[i] >= 3 then
+        spawn_projectile(enemy)
+        last_enemy_projectile_time[i] = time()
+    end
 end
 
 function update_enemies()
-    for i, enemy in pairs(enemies) do
-        -- If enemy is a chaser, move it towards the player
+    for i = 1, #enemies-1 do
+        local enemy = enemies[i]
         if enemy.speed then
-            local dx = player.x - enemy.x
-            local dy = player.y - enemy.y
-            local len = sqrt(dx * dx + dy * dy)
-            enemy.x = enemy.x + dx / len * enemy.speed
-            enemy.y = enemy.y + dy / len * enemy.speed
-        end
+            update_generic_enemy(enemy, i)
 
-        -- Initialize last projectile time for this enemy if not already done
-        if not last_enemy_projectile_time[i] then
-            last_enemy_projectile_time[i] = time()
-        end
-
-        if projectiles_on then 
-            -- If 3 seconds have passed, spawn a projectile
-            if time() - last_enemy_projectile_time[i] >= 3 then
-                spawn_projectile(enemy)
-                last_enemy_projectile_time[i] = time()
+            if enemy.is_big_chaser then
+                update_big_chaser(enemy)
+            else
+                update_small_chasers(i, enemy)
             end
         end
+
+        update_projectiles(i, enemy)
     end
 end
+
+
 
 function create_enemies()
     if(chasers_on or shooters_on) then
@@ -199,17 +224,12 @@ function _draw()
 
     draw_map()
     draw_player()
-    draw_enemies()
+    draw_enemies() -- This will now draw both small chasers and big chasers
     draw_projectiles()
 
-    draw_big_chaser(big_chaser)
-
-    -- if debug then
-        -- If debug is true, draw debug information
-        draw_debug()
-        -- draw_mouse()
-    -- end
+    draw_debug()
 end
+
 
 function draw_player()
     -- Draw player
@@ -218,9 +238,14 @@ end
 
 function draw_enemies()
     for e in all(enemies) do
-        spr(e.spr, e.x, e.y)
+        if e.is_big_chaser then
+            draw_big_chaser(e)
+        else
+            spr(e.spr, e.x, e.y)
+        end
     end
 end
+
 
 function draw_big_chaser(chaser)
     spr(chaser.sprs[1], chaser.x, chaser.y)
