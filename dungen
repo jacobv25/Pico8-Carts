@@ -1,0 +1,297 @@
+pico-8 cartridge // http://www.pico-8.com
+version 41
+__lua__
+
+-- Constants
+GRID_SIZE = 8
+MIN_ROOM_SIZE = 4
+MAX_ROOM_SIZE = 6
+MAX_ROOMS = 3
+MIN_HALLWAY_LENGTH = 2
+MAX_HALLWAY_LENGTH = 6
+
+MOVE_SPEED = 2  -- Adjust as desired for faster/slower movement
+
+rooms = {}
+hallways = {}
+doors = {}  -- List of doors
+
+-- global vars
+view_offset_x = 0
+view_offset_y = 0
+
+function create_door_for_room(room)
+    local door = {}
+    
+    -- Decide which wall: 1 = top, 2 = right, 3 = bottom, 4 = left
+    local wall = flr(rnd(4)) + 1
+
+    if wall == 1 then
+        -- Top wall
+        door.x = (flr(rnd(room.w/GRID_SIZE)) * GRID_SIZE) + room.x
+        door.y = room.y
+        door.w = GRID_SIZE  -- Width of the door
+        door.h = 1  -- Height of the door
+    elseif wall == 2 then
+        -- Right wall
+        door.x = room.x + room.w - 1
+        door.y = (flr(rnd(room.h/GRID_SIZE)) * GRID_SIZE) + room.y
+        door.w = 1  -- Width of the door
+        door.h = GRID_SIZE  -- Height of the door
+    elseif wall == 3 then
+        -- Bottom wall
+        door.x = (flr(rnd(room.w/GRID_SIZE)) * GRID_SIZE) + room.x
+        door.y = room.y + room.h - 1
+        door.w = GRID_SIZE  -- Width of the door
+        door.h = 1  -- Height of the door
+    else
+        -- Left wall
+        door.x = room.x
+        door.y = (flr(rnd(room.h/GRID_SIZE)) * GRID_SIZE) + room.y
+        door.w = 1  -- Width of the door
+        door.h = GRID_SIZE  -- Height of the door
+    end
+
+    add(doors, door)
+end
+
+function hallway_overlaps_room(hallway, room)
+    return hallway.x < room.x + room.w and
+           hallway.x + hallway.w > room.x and
+           hallway.y < room.y + room.h and
+           hallway.y + hallway.h > room.y
+end
+
+function room_overlaps_hallways(new_room)
+    for hallway in all(hallways) do
+        if new_room.x < hallway.x + hallway.w and
+           new_room.x + new_room.w > hallway.x and
+           new_room.y < hallway.y + hallway.h and
+           new_room.y + new_room.h > hallway.y then
+            return true
+        end
+    end
+    return false
+end
+
+function create_door_at_end_of_hallway(hallway, original_door)
+    local door = {}
+
+    if hallway.w == GRID_SIZE then
+        -- Vertical hallway
+        door.w = GRID_SIZE
+        door.h = 1
+
+        -- Check the direction of the hallway
+        if hallway.y < original_door.y then
+            -- The hallway is moving upwards
+            door.x = hallway.x
+            door.y = hallway.y
+        else
+            -- The hallway is moving downwards
+            door.x = hallway.x
+            door.y = hallway.y + hallway.h - door.h
+        end
+    else
+        -- Horizontal hallway
+        door.w = 1
+        door.h = GRID_SIZE
+
+        -- Check the direction of the hallway
+        if hallway.x < original_door.x then
+            -- The hallway is moving to the left
+            door.x = hallway.x
+            door.y = hallway.y
+        else
+            -- The hallway is moving to the right
+            door.x = hallway.x + hallway.w - door.w
+            door.y = hallway.y
+        end
+    end
+
+    add(doors, door)
+
+    return door
+end
+
+function room_overlaps_other_rooms(new_room)
+    for room in all(rooms) do
+        if new_room.x < room.x + room.w and
+           new_room.x + new_room.w > room.x and
+           new_room.y < room.y + room.h and
+           new_room.y + new_room.h > room.y then
+            return true
+        end
+    end
+    return false
+end
+
+function create_room_attached_to_door(door)
+    local room = {}
+    local w = flr(rnd(MAX_ROOM_SIZE - MIN_ROOM_SIZE + 1) + MIN_ROOM_SIZE)
+    local h = flr(rnd(MAX_ROOM_SIZE - MIN_ROOM_SIZE + 1) + MIN_ROOM_SIZE)
+    room.w = w * GRID_SIZE
+    room.h = h * GRID_SIZE
+
+    if door.w > door.h then  -- Horizontal door
+        room.x = door.x + door.w/2 - room.w/2
+
+        -- Check the door's position relative to the original room
+        if door.y == 0 or room_overlaps_other_rooms({x=room.x, y=door.y - room.h, w=room.w, h=room.h}) then
+            -- If the door is at the top or the upward direction overlaps other rooms, place the room below
+            room.y = door.y + door.h
+        else
+            room.y = door.y - room.h
+        end
+
+    else  -- Vertical door
+        room.y = door.y + door.h/2 - room.h/2
+
+        -- Check the door's position relative to the original room
+        if door.x == 0 or room_overlaps_other_rooms({x=door.x - room.w, y=room.y, w=room.w, h=room.h}) then
+            -- If the door is on the left or the leftward direction overlaps other rooms, place the room to the right
+            room.x = door.x + door.w
+        else
+            room.x = door.x - room.w
+        end
+    end
+
+    -- Ensure room doesn't overlap with other rooms or hallways
+    if not room_overlaps_other_rooms(room) and not room_overlaps_hallways(room) then
+        add(rooms, room)
+    end
+
+end
+
+function create_hallway_from_door(door)
+    local hallway = {}
+
+    if door.w > door.h then
+        -- Horizontal door (on top or bottom wall)
+
+        hallway.x = door.x + door.w/2 - GRID_SIZE/2
+        hallway.w = GRID_SIZE
+        hallway.h = flr(rnd(MAX_HALLWAY_LENGTH - MIN_HALLWAY_LENGTH + 1) + MIN_HALLWAY_LENGTH) * GRID_SIZE
+
+        if door.y == 0 or hallway_overlaps_room({x=hallway.x, y=door.y - hallway.h, w=hallway.w, h=hallway.h}, rooms[1]) then
+            -- If the door is at the top or the upward direction overlaps the room, hallway goes downwards
+            hallway.y = door.y + door.h
+        else
+            -- If the door is at the bottom or the downward direction overlaps the room, hallway goes upwards
+            hallway.y = door.y - hallway.h
+        end
+
+    else
+        -- Vertical door (on left or right wall)
+
+        hallway.y = door.y + door.h/2 - GRID_SIZE/2
+        hallway.h = GRID_SIZE
+        hallway.w = flr(rnd(MAX_HALLWAY_LENGTH - MIN_HALLWAY_LENGTH + 1) + MIN_HALLWAY_LENGTH) * GRID_SIZE
+
+        if door.x == 0 or hallway_overlaps_room({x=door.x - hallway.w, y=hallway.y, w=hallway.w, h=hallway.h}, rooms[1]) then
+            -- If the door is on the left or the leftward direction overlaps the room, hallway goes to the right
+            hallway.x = door.x + door.w
+        else
+            -- If the door is on the right or the rightward direction overlaps the room, hallway goes to the left
+            hallway.x = door.x - hallway.w
+        end
+    end
+
+    add(hallways, hallway)
+    local end_door = create_door_at_end_of_hallway(hallway, door)
+    create_room_attached_to_door(end_door)
+end
+
+function generate_dungeon()
+    local w = flr(rnd(MAX_ROOM_SIZE - MIN_ROOM_SIZE + 1) + MIN_ROOM_SIZE)
+    local h = flr(rnd(MAX_ROOM_SIZE - MIN_ROOM_SIZE + 1) + MIN_ROOM_SIZE)
+
+    -- Adjust the starting x and y to be centered
+    local x = 64 - (w * GRID_SIZE / 2)
+    local y = 64 - (h * GRID_SIZE / 2)
+
+    add(rooms, {x=x, y=y, w=w*GRID_SIZE, h=h*GRID_SIZE})
+
+    -- Create door for the room
+    create_door_for_room(rooms[1])
+    -- Create hallway from the door
+    create_hallway_from_door(doors[1])
+end
+
+
+function _init()
+    -- Generate the dungeon
+    generate_dungeon()
+
+    -- Adjust the initial camera to center on the initial room
+    view_offset_x = rooms[1].x + (rooms[1].w / 2) - 64
+    view_offset_y = rooms[1].y + (rooms[1].h / 2) - 64
+    -- local w = flr(rnd(MAX_ROOM_SIZE - MIN_ROOM_SIZE + 1) + MIN_ROOM_SIZE)
+    -- local h = flr(rnd(MAX_ROOM_SIZE - MIN_ROOM_SIZE + 1) + MIN_ROOM_SIZE)
+    
+    -- -- Adjust the starting x and y to be centered
+    -- local x = 64 - (w * GRID_SIZE / 2)
+    -- local y = 64 - (h * GRID_SIZE / 2)
+    
+    -- add(rooms, {x=x, y=y, w=w*GRID_SIZE, h=h*GRID_SIZE})
+
+    -- -- Create door for the room
+    -- create_door_for_room(rooms[1])
+    -- -- Create hallway from the door
+    -- create_hallway_from_door(doors[1])
+end
+
+
+function _update()
+    if btnp(0) then  -- left arrow
+        view_offset_x -= GRID_SIZE
+    end
+    if btnp(1) then  -- right arrow
+        view_offset_x += GRID_SIZE
+    end
+    if btnp(2) then  -- up arrow
+        view_offset_y -= GRID_SIZE
+    end
+    if btnp(3) then  -- down arrow
+        view_offset_y += GRID_SIZE
+    end
+end
+
+
+function _draw()
+    cls(0)  -- Clear the screen with black color
+
+    -- Draw the grid
+    for gx = 0, 128, GRID_SIZE do
+        for gy = 0, 128, GRID_SIZE do
+            -- Draw vertical lines
+            line(gx, 0, gx, 128, 8)
+            -- Draw horizontal lines
+            line(0, gy, 128, gy, 8)
+        end
+    end
+
+    -- Draw room
+    for room in all(rooms) do
+        rectfill(room.x - view_offset_x, room.y - view_offset_y, room.x + room.w - view_offset_x, room.y + room.h - view_offset_y, 9)
+    end
+
+    -- Draw hallways
+    for h in all(hallways) do
+        rectfill(h.x - view_offset_x, h.y - view_offset_y, h.x + h.w - view_offset_x, h.y + h.h - view_offset_y, 5)
+    end
+
+    -- Draw door
+    for door in all(doors) do
+        rectfill(door.x - view_offset_x, door.y - view_offset_y, door.x + door.w - view_offset_x, door.y + door.h - view_offset_y, 7)  -- assuming color 7 for doors
+    end
+end
+
+
+__gfx__
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00700700000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00077000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00077000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00700700000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
